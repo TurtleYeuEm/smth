@@ -1,0 +1,30 @@
+return"local module = {}
+
+local obfuscation_module = loadstring(game:HttpGet("loadstring(game:HttpGet("https://raw.githubusercontent.com/TurtleYeuEm/smth/refs/heads/main/Encryption-Module.luau.txt"))()"))()
+
+local methods = {
+    [1] = {[1]="BASE64",[2]="HEX",[3]="BINARY"},
+    [2] = {[2]="BASE64",[1]="HEX",[3]="BINARY"},
+    [3] = {[3]="BASE64",[2]="HEX",[1]="BINARY"},
+    [4] = {[2]="BASE64",[3]="HEX",[1]="BINARY"},
+    [5] = {[1]="BASE64",[3]="HEX",[2]="BINARY"},
+    [6] = {[3]="BASE64",[1]="HEX",[2]="BINARY"}
+}
+
+function decodetablemethod(tbl, code)
+return function() local c = code; c = obfuscation_module:Decode(tbl[1],c); c = obfuscation_module:Decode(tbl[2],c); c = obfuscation_module:Decode(tbl[3],c); return c end
+end
+
+function module.load(code)
+for i,v in ipairs(methods) do
+pcall(function()
+loadstring(tostring(decodetablemethod(v,code)()))()
+end)
+end
+end
+
+function module.obfuscate(code)
+return function() local tbl = methods[math.round(1,6)]; local c = code; c = obfuscation_module:Encode(tbl[1],c); c = obfuscation_module:Encode(tbl[2],c); c = obfuscation_module:Encode(tbl[3],c); pcall(setclipboard, 'loadstring(game:HttpGet("https://raw.githubusercontent.com/NewNexer/Encryption-Center/refs/heads/main/Main.luau"))().load("'..tostring((c:gsub(".", function(bb) return "\\" .. bb:byte() end) or c .. "\""))..'")'); return end
+end
+
+return module"
