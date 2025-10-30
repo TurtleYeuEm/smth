@@ -1,210 +1,159 @@
+local StarterPlayer = game:GetService("StarterPlayer")
+local spScripts = StarterPlayer:WaitForChild("StarterPlayerScripts")
+
+local scriptName = "SmartClickToMove"
+
+local function createClickToMove()
+	if spScripts:FindFirstChild(scriptName) then
+		spScripts[scriptName]:Destroy()
+	end
+
+	local newScript = Instance.new("LocalScript")
+	newScript.Name = scriptName
+
+	newScript.Source = [[
+-- SmartClickToMove (v1)
+-- Click to Move + GUI + dodge kill/damage part + dot/line light + red zone
+
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
-local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local Mouse = LocalPlayer:GetMouse()
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local player = Players.LocalPlayer
-local mouse = player:GetMouse()
+-- UI to create on/off button
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ClickToMoveUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
 
-local isClickToMove = false
-local moving = false
+local Button = Instance.new("TextButton")
+Button.Size = UDim2.new(0, 200, 0, 50)
+Button.Position = UDim2.new(0, 20, 0, 80)
+Button.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+Button.Text = "🔴 Click To Move: OFF"
+Button.Font = Enum.Font.GothamBold
+Button.TextSize = 16
+Button.Parent = ScreenGui
 
-local killKeywords = {"kill", "lava", "death", "dead", "ouch", "damage", "acid", "fire", "hurt"}
-
---// 🟢 GUI chosu Mobile
-local gui = Instance.new("ScreenGui")
-gui.Name = "SmartClickToMoveUI"
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
-
-local button = Instance.new("TextButton")
-button.Size = UDim2.new(0, 220, 0, 65)
-button.Position = UDim2.new(0.05, 0, 0.8, 0)
-button.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-button.TextColor3 = Color3.fromRGB(255, 255, 255)
-button.Font = Enum.Font.GothamBold
-button.TextScaled = true
-button.Text = "🔴 Click To Move: OFF"
-button.Draggable = true
-button.Parent = gui
-
-local warnLabel = Instance.new("TextLabel")
-warnLabel.Size = UDim2.new(0, 350, 0, 50)
-warnLabel.Position = UDim2.new(0.5, -175, 0.1, 0)
-warnLabel.BackgroundTransparency = 1
-warnLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-warnLabel.Font = Enum.Font.GothamBold
-warnLabel.TextScaled = true
-warnLabel.Text = ""
-warnLabel.Parent = gui
-
---// Show warning
-local function showWarning(text)
-	warnLabel.Text = text
-	task.delay(2, function()
-		if warnLabel.Text == text then
-			warnLabel.Text = ""
-		end
-	end)
-end
-
---// On/Off button
-local function updateButton()
-	if isClickToMove then
-		button.Text = "🟢 Click To Move: ON"
-		button.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
-	else
-		button.Text = "🔴 Click To Move: OFF"
-		button.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-	end
-end
-
-button.MouseButton1Click:Connect(function()
-	isClickToMove = not isClickToMove
-	updateButton()
+local clickToMoveEnabled = false
+Button.MouseButton1Click:Connect(function()
+	clickToMoveEnabled = not clickToMoveEnabled
+	Button.Text = clickToMoveEnabled and "🟢 Click To Move: ON" or "🔴 Click To Move: OFF"
+	Button.BackgroundColor3 = clickToMoveEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(255, 80, 80)
 end)
-updateButton()
 
---// Identify danger zones
-local function isDangerousPart(part)
-	if not part or not part:IsA("BasePart") then return false end
-	local name = string.lower(part.Name)
-	for _, word in ipairs(killKeywords) do
-		if string.find(name, word) then return true end
-	end
-	for _, c in ipairs(part:GetChildren()) do
-		if c:IsA("TouchTransmitter") then
-			return true
+local pathDots = {}
+local dangerZones = {}
+
+local function clearVisuals()
+	for _,v in pairs(pathDots) do v:Destroy() end
+	pathDots = {}
+	for _,v in pairs(dangerZones) do v:Destroy() end
+	dangerZones = {}
+end
+
+local function isDangerous(part)
+	if not part:IsA("BasePart") then return false end
+	local name = part.Name:lower()
+	return name:find("kill") or name:find("lava") or name:find("damage")
+end
+
+local function visualizeDanger()
+	for _, part in pairs(workspace:GetDescendants()) do
+		if isDangerous(part) then
+			local box = Instance.new("BoxHandleAdornment")
+			box.Adornee = part
+			box.Size = part.Size + Vector3.new(0.1,0.1,0.1)
+			box.Color3 = Color3.fromRGB(255, 0, 0)
+			box.AlwaysOnTop = true
+			box.ZIndex = 2
+			box.Transparency = 0.6
+			box.Parent = part
+			table.insert(dangerZones, box)
 		end
 	end
-	if part.Material == Enum.Material.Neon and part.Color.r > 0.8 and part.Color.g < 0.3 then
-		return true
-	end
-	return false
 end
 
---// Draw the danger zone
-local function drawDangerZone(part)
-	local highlight = Instance.new("BoxHandleAdornment")
-	highlight.Adornee = part
-	highlight.AlwaysOnTop = true
-	highlight.ZIndex = 5
-	highlight.Color3 = Color3.fromRGB(255, 0, 0)
-	highlight.Transparency = 0.6
-	highlight.Size = part.Size + Vector3.new(0.3, 0.3, 0.3)
-	highlight.Parent = workspace
-	Debris:AddItem(highlight, 2)
-end
-
---// Dot shows the path
-local function createDot(pos)
-	local dot = Instance.new("Part")
-	dot.Anchored = true
-	dot.CanCollide = false
-	dot.Material = Enum.Material.Neon
-	dot.Color = Color3.fromRGB(0, 255, 255)
-	dot.Shape = Enum.PartType.Ball
-	dot.Size = Vector3.new(0.3, 0.3, 0.3)
-	dot.Position = pos + Vector3.new(0, 0.3, 0)
-	dot.Parent = workspace
-	Debris:AddItem(dot, 2)
-end
-
---// Destination marker
-local function createMarker(pos)
-	local p = Instance.new("Part")
-	p.Anchored = true
-	p.CanCollide = false
-	p.Material = Enum.Material.Neon
-	p.Color = Color3.fromRGB(0, 255, 0)
-	p.Shape = Enum.PartType.Ball
-	p.Size = Vector3.new(0.6, 0.6, 0.6)
-	p.Position = pos + Vector3.new(0, 0.25, 0)
-	p.Parent = workspace
-	Debris:AddItem(p, 2)
-end
-
---// Can you jump over dangerous objects?
-local function canJumpOver(startPos, dangerPart)
-	local top = dangerPart.Position.Y + dangerPart.Size.Y / 2
-	local heightDiff = top - startPos.Y
-	return heightDiff < 7
-end
-
---// Move along the path
-local function moveAlongPath(character, humanoid, path)
-	moving = true
-	for _, wp in ipairs(path:GetWaypoints()) do
-		if not moving then break end
-		createDot(wp.Position)
-
-		local parts = workspace:GetPartBoundsInRadius(wp.Position, 1.5)
-		for _, p in ipairs(parts) do
-			if isDangerousPart(p) then
-				drawDangerZone(p)
-				if canJumpOver(character.HumanoidRootPart.Position, p) then
-					humanoid.Jump = true
-					showWarning("🪂 Jump over the danger zone!")
-				else
-					showWarning("⚠️ The road is trap! Find another way...")
-					moving = false
-					return
-				end
-			end
-		end
-
-		if wp.Action == Enum.PathWaypointAction.Jump then
-			humanoid.Jump = true
-		end
-		humanoid:MoveTo(wp.Position)
-		humanoid.MoveToFinished:Wait()
-	end
-	moving = false
-end
-
---// Find the click location
-local function getGroundPosition()
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = {player.Character}
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	local ray = workspace:Raycast(mouse.UnitRay.Origin, mouse.UnitRay.Direction * 500, rayParams)
-	if ray then
-		return ray.Position, ray.Instance
+local function drawPath(points)
+	for _,v in pairs(points) do
+		local dot = Instance.new("Part")
+		dot.Shape = Enum.PartType.Ball
+		dot.Color = Color3.fromRGB(0, 255, 100)
+		dot.Material = Enum.Material.Neon
+		dot.Size = Vector3.new(0.3, 0.3, 0.3)
+		dot.Anchored = true
+		dot.CanCollide = false
+		dot.CFrame = CFrame.new(v)
+		dot.Parent = workspace
+		table.insert(pathDots, dot)
 	end
 end
 
---// When clicked
-mouse.Button1Down:Connect(function()
-	if not isClickToMove then return end
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then return end
-
-	local destination, hitPart = getGroundPosition()
-	if not destination then return end
-
-	if isDangerousPart(hitPart) and not canJumpOver(character.HumanoidRootPart.Position, hitPart) then
-		showWarning("🚫 Cannot pass through the danger zone!")
-		drawDangerZone(hitPart)
-		return
-	end
-
-	createMarker(destination)
+local function moveTo(position)
+	clearVisuals()
+	visualizeDanger()
 
 	local path = PathfindingService:CreatePath({
 		AgentRadius = 2,
 		AgentHeight = 5,
 		AgentCanJump = true,
-		Costs = {Water = math.huge}
+		AgentJumpHeight = 7,
+		AgentMaxSlope = 45
 	})
 
-	path:ComputeAsync(character.HumanoidRootPart.Position, destination)
+	path:ComputeAsync(Character.HumanoidRootPart.Position, position)
 
 	if path.Status == Enum.PathStatus.Success then
-		moveAlongPath(character, humanoid, path)
+		local waypoints = path:GetWaypoints()
+
+		local safeWaypoints = {}
+		for _, wp in ipairs(waypoints) do
+			local ray = Ray.new(wp.Position + Vector3.new(0,2,0), Vector3.new(0,-4,0))
+			local hit = workspace:FindPartOnRay(ray, Character)
+			if hit and isDangerous(hit) then
+				-- bỏ qua waypoint nguy hiểm
+			else
+				table.insert(safeWaypoints, wp)
+			end
+		end
+
+		drawPath(safeWaypoints)
+
+		for _, wp in ipairs(safeWaypoints) do
+			Humanoid:MoveTo(wp.Position)
+			if wp.Action == Enum.PathWaypointAction.Jump then
+				Humanoid.Jump = true
+			end
+			Humanoid.MoveToFinished:Wait()
+		end
 	else
-		showWarning("❌ Can't find a safe way!")
+		warn("Can't find a safe way.")
+	end
+end
+
+Mouse.Button1Down:Connect(function()
+	if not clickToMoveEnabled then return end
+	local target = Mouse.Hit and Mouse.Hit.p
+	if target then
+		moveTo(target)
 	end
 end)
+]]
 
-print("✅ Click to move I do it myself") loaded successfully!")
+	newScript.Parent = spScripts
+	print("[AutoCreateClickToMove] ✅ Recreated SmartClickToMove script.")
+end
+
+-- Check every 5 seconds
+while task.wait(5) do
+	local s = spScripts:FindFirstChild(scriptName)
+	if not s or not s:IsA("LocalScript") then
+		createClickToMove()
+	end
+end
