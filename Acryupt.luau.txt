@@ -11,7 +11,7 @@ local moving = false
 
 local killKeywords = {"kill", "lava", "death", "dead", "ouch", "damage", "acid", "fire", "hurt"}
 
---// 🟢 GUI cho Mobile
+--// 🟢 GUI chosu Mobile
 local gui = Instance.new("ScreenGui")
 gui.Name = "SmartClickToMoveUI"
 gui.ResetOnSpawn = false
