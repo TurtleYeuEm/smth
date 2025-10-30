@@ -1,0 +1,210 @@
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+local isClickToMove = false
+local moving = false
+
+local killKeywords = {"kill", "lava", "death", "dead", "ouch", "damage", "acid", "fire", "hurt"}
+
+--// 🟢 GUI cho Mobile
+local gui = Instance.new("ScreenGui")
+gui.Name = "SmartClickToMoveUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(0, 220, 0, 65)
+button.Position = UDim2.new(0.05, 0, 0.8, 0)
+button.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.Font = Enum.Font.GothamBold
+button.TextScaled = true
+button.Text = "🔴 Click To Move: OFF"
+button.Draggable = true
+button.Parent = gui
+
+local warnLabel = Instance.new("TextLabel")
+warnLabel.Size = UDim2.new(0, 350, 0, 50)
+warnLabel.Position = UDim2.new(0.5, -175, 0.1, 0)
+warnLabel.BackgroundTransparency = 1
+warnLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+warnLabel.Font = Enum.Font.GothamBold
+warnLabel.TextScaled = true
+warnLabel.Text = ""
+warnLabel.Parent = gui
+
+--// Show warning
+local function showWarning(text)
+	warnLabel.Text = text
+	task.delay(2, function()
+		if warnLabel.Text == text then
+			warnLabel.Text = ""
+		end
+	end)
+end
+
+--// On/Off button
+local function updateButton()
+	if isClickToMove then
+		button.Text = "🟢 Click To Move: ON"
+		button.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+	else
+		button.Text = "🔴 Click To Move: OFF"
+		button.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+	end
+end
+
+button.MouseButton1Click:Connect(function()
+	isClickToMove = not isClickToMove
+	updateButton()
+end)
+updateButton()
+
+--// Identify danger zones
+local function isDangerousPart(part)
+	if not part or not part:IsA("BasePart") then return false end
+	local name = string.lower(part.Name)
+	for _, word in ipairs(killKeywords) do
+		if string.find(name, word) then return true end
+	end
+	for _, c in ipairs(part:GetChildren()) do
+		if c:IsA("TouchTransmitter") then
+			return true
+		end
+	end
+	if part.Material == Enum.Material.Neon and part.Color.r > 0.8 and part.Color.g < 0.3 then
+		return true
+	end
+	return false
+end
+
+--// Draw the danger zone
+local function drawDangerZone(part)
+	local highlight = Instance.new("BoxHandleAdornment")
+	highlight.Adornee = part
+	highlight.AlwaysOnTop = true
+	highlight.ZIndex = 5
+	highlight.Color3 = Color3.fromRGB(255, 0, 0)
+	highlight.Transparency = 0.6
+	highlight.Size = part.Size + Vector3.new(0.3, 0.3, 0.3)
+	highlight.Parent = workspace
+	Debris:AddItem(highlight, 2)
+end
+
+--// Dot shows the path
+local function createDot(pos)
+	local dot = Instance.new("Part")
+	dot.Anchored = true
+	dot.CanCollide = false
+	dot.Material = Enum.Material.Neon
+	dot.Color = Color3.fromRGB(0, 255, 255)
+	dot.Shape = Enum.PartType.Ball
+	dot.Size = Vector3.new(0.3, 0.3, 0.3)
+	dot.Position = pos + Vector3.new(0, 0.3, 0)
+	dot.Parent = workspace
+	Debris:AddItem(dot, 2)
+end
+
+--// Destination marker
+local function createMarker(pos)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.Material = Enum.Material.Neon
+	p.Color = Color3.fromRGB(0, 255, 0)
+	p.Shape = Enum.PartType.Ball
+	p.Size = Vector3.new(0.6, 0.6, 0.6)
+	p.Position = pos + Vector3.new(0, 0.25, 0)
+	p.Parent = workspace
+	Debris:AddItem(p, 2)
+end
+
+--// Can you jump over dangerous objects?
+local function canJumpOver(startPos, dangerPart)
+	local top = dangerPart.Position.Y + dangerPart.Size.Y / 2
+	local heightDiff = top - startPos.Y
+	return heightDiff < 7
+end
+
+--// Move along the path
+local function moveAlongPath(character, humanoid, path)
+	moving = true
+	for _, wp in ipairs(path:GetWaypoints()) do
+		if not moving then break end
+		createDot(wp.Position)
+
+		local parts = workspace:GetPartBoundsInRadius(wp.Position, 1.5)
+		for _, p in ipairs(parts) do
+			if isDangerousPart(p) then
+				drawDangerZone(p)
+				if canJumpOver(character.HumanoidRootPart.Position, p) then
+					humanoid.Jump = true
+					showWarning("🪂 Jump over the danger zone!")
+				else
+					showWarning("⚠️ The road is trap! Find another way...")
+					moving = false
+					return
+				end
+			end
+		end
+
+		if wp.Action == Enum.PathWaypointAction.Jump then
+			humanoid.Jump = true
+		end
+		humanoid:MoveTo(wp.Position)
+		humanoid.MoveToFinished:Wait()
+	end
+	moving = false
+end
+
+--// Find the click location
+local function getGroundPosition()
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {player.Character}
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local ray = workspace:Raycast(mouse.UnitRay.Origin, mouse.UnitRay.Direction * 500, rayParams)
+	if ray then
+		return ray.Position, ray.Instance
+	end
+end
+
+--// When clicked
+mouse.Button1Down:Connect(function()
+	if not isClickToMove then return end
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	local destination, hitPart = getGroundPosition()
+	if not destination then return end
+
+	if isDangerousPart(hitPart) and not canJumpOver(character.HumanoidRootPart.Position, hitPart) then
+		showWarning("🚫 Cannot pass through the danger zone!")
+		drawDangerZone(hitPart)
+		return
+	end
+
+	createMarker(destination)
+
+	local path = PathfindingService:CreatePath({
+		AgentRadius = 2,
+		AgentHeight = 5,
+		AgentCanJump = true,
+		Costs = {Water = math.huge}
+	})
+
+	path:ComputeAsync(character.HumanoidRootPart.Position, destination)
+
+	if path.Status == Enum.PathStatus.Success then
+		moveAlongPath(character, humanoid, path)
+	else
+		showWarning("❌ Can't find a safe way!")
+	end
+end)
+
+print("✅ Click to move I do it myself") loaded successfully!")
